@@ -8,7 +8,7 @@
     <!-- leaflet css -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
 
-    <title>Web-GIS Batas Kecamatan, Jalan, dan Layer Sleman</title>
+    <title>Web-GIS Batas Kecamatan dengan GeoServer dan Leaflet</title>
 
     <style>
       body {
@@ -19,12 +19,6 @@
         width: 100%;
         height: 100vh;
       }
-      .nav-lokasi button {
-        display: block;
-        margin: 2px;
-        padding: 6px 10px;
-        cursor: pointer;
-      }
     </style>
   </head>
   <body>
@@ -34,14 +28,17 @@
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <!-- jquery -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
-    <!-- plugin leaflet-geoserver-request (dipakai untuk WMS dan legenda) -->
+    <!-- plugin leaflet-geoserver-request -->
     <script src="lib/L.Geoserver.js"></script>
 
     <script>
-      var posisiFlores = { center: [-8.35922, 122.93015], zoom: 9 };
-      var posisiSleman = { center: [-7.72, 110.35], zoom: 11 };
-
-      var map = L.map("map").setView(posisiFlores.center, posisiFlores.zoom);
+      // Peta langsung diarahkan ke bbox layer batas_kecamatan
+      // bbox: minx, miny, maxx, maxy -> Leaflet: [[lat_min, lng_min], [lat_max, lng_max]]
+      var map = L.map("map");
+      map.fitBounds([
+        [-8.647220457999936, 122.6477921720001],
+        [-8.063357603999975, 123.33921143000009],
+      ]);
 
       var osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
@@ -50,105 +47,46 @@
       });
       osm.addTo(map);
 
-      var geoserverUrl = "http://localhost:8080/geoserver/pgweb/wms";
-
-      // ===== WMS Batas Kecamatan =====
-      var kecamatanLayer = L.Geoserver.wms(geoserverUrl, {
+      // ===== WMS =====
+      var wmsLayer = L.Geoserver.wms("http://localhost:8080/geoserver/pgweb/wms", {
         layers: "pgweb:batas_kecamatan",
         transparent: true,
         format: "image/png",
         attribution: "Batas Kecamatan",
+        // CQL_FILTER: "nama_kecamatan='NAMA'",  // contoh filter, sesuaikan nama kolom
       });
-      kecamatanLayer.addTo(map);
+      wmsLayer.addTo(map);
 
-      // ===== WMS Jalan =====
-      var jalanLayer = L.Geoserver.wms(geoserverUrl, {
-        layers: "pgweb:jalan",
-        transparent: true,
-        format: "image/png",
-        attribution: "Jalan",
-      });
-      jalanLayer.addTo(map);
-
-      // ===== WFS Batas Kecamatan (GeoJSON, bisa diklik) =====
-      var wfsKecamatan = L.geoJSON(null, {
-        style: { color: "#333", weight: 1, fillColor: "red", fillOpacity: 0.3 },
+      // ===== WFS (opsional, aktifkan dengan menghapus komentar addTo) =====
+      var wfsLayer = L.Geoserver.wfs("http://localhost:8080/geoserver/pgweb/wfs", {
+        layers: "pgweb:batas_kecamatan",
+        style: {
+          color: "black",
+          weight: 1,
+          fillOpacity: 0.3,
+          fillColor: "red",
+        },
         onEachFeature: function (feature, layer) {
-          layer.bindPopup("Kecamatan: " + feature.properties.NAMOBJ);
+          // Popup otomatis menampilkan semua atribut layer
+          var html = "<table>";
+          for (var key in feature.properties) {
+            html += "<tr><td><b>" + key + "</b></td><td>" + feature.properties[key] + "</td></tr>";
+          }
+          html += "</table>";
+          layer.bindPopup(html);
         },
       });
-
-      var wfsUrl =
-        "http://localhost:8080/geoserver/pgweb/ows" +
-        "?service=WFS&version=1.0.0&request=GetFeature" +
-        "&typeName=pgweb:batas_kecamatan" +
-        "&outputFormat=application/json" +
-        "&srsName=EPSG:4326";
-
-      fetch(wfsUrl)
-        .then(function (r) {
-          return r.json();
-        })
-        .then(function (data) {
-          console.log("WFS berhasil, jumlah fitur:", data.features.length);
-          wfsKecamatan.addData(data);
-        })
-        .catch(function (e) {
-          console.error("WFS gagal:", e);
-        });
-
-      // ===== WMS Geoportal Sleman (GeoNode) =====
-      // Ganti NAMA_LAYER dengan nama layer dari GetCapabilities / OGC Services
-      var slemanLayer = L.tileLayer.wms("https://geoportal.slemankab.go.id/geoserver/ows", {
-        layers: "geonode:NAMA_LAYER",
-        format: "image/png",
-        transparent: true,
-        version: "1.1.0",
-        attribution: "Geoportal Sleman",
-      });
-      // Tidak ditambahkan otomatis, centang di kontrol layer setelah pindah ke Sleman
-      // slemanLayer.addTo(map);
+      // wfsLayer.addTo(map);
 
       // ===== Legenda =====
-      var legendKecamatan = L.Geoserver.legend(geoserverUrl, {
+      var layerLegend = L.Geoserver.legend("http://localhost:8080/geoserver/pgweb/wms", {
         layers: "pgweb:batas_kecamatan",
       });
-      legendKecamatan.addTo(map);
+      layerLegend.addTo(map);
 
-      var legendJalan = L.Geoserver.legend(geoserverUrl, {
-        layers: "pgweb:jalan",
-      });
-      legendJalan.addTo(map);
-
-      // ===== Tombol pindah lokasi =====
-      var navLokasi = L.control({ position: "topleft" });
-      navLokasi.onAdd = function () {
-        var div = L.DomUtil.create("div", "nav-lokasi leaflet-bar");
-        div.innerHTML =
-          '<button id="btnFlores">Flores</button><button id="btnSleman">Sleman</button>';
-        L.DomEvent.disableClickPropagation(div);
-        return div;
-      };
-      navLokasi.addTo(map);
-
-      document.getElementById("btnFlores").onclick = function () {
-        map.setView(posisiFlores.center, posisiFlores.zoom);
-      };
-      document.getElementById("btnSleman").onclick = function () {
-        map.setView(posisiSleman.center, posisiSleman.zoom);
-      };
-
-      // ===== Kontrol layer =====
+      // Kontrol layer
       L.control
-        .layers(
-          { OpenStreetMap: osm },
-          {
-            "Batas Kecamatan (WMS)": kecamatanLayer,
-            "Batas Kecamatan (WFS, bisa diklik)": wfsKecamatan,
-            "Jalan (WMS)": jalanLayer,
-            "Layer Sleman (WMS)": slemanLayer,
-          }
-        )
+        .layers({ OpenStreetMap: osm }, { "Batas Kecamatan (WMS)": wmsLayer, "Batas Kecamatan (WFS)": wfsLayer })
         .addTo(map);
     </script>
   </body>
